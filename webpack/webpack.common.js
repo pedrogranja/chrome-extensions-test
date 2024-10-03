@@ -34,6 +34,7 @@ module.exports = {
     resolve: {
         extensions: [".ts", ".tsx", ".js"],
     },
+    devtool: 'source-map',
     plugins: [
         new CopyPlugin({
             patterns: [{ from: ".", to: "../", context: "public" }],

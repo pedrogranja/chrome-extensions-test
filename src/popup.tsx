@@ -9,14 +9,29 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { TracingInstrumentation } from "@grafana/faro-web-tracing";
 import { createRoutesFromChildren, matchRoutes, Routes, useLocation, useNavigationType } from "react-router-dom";
 
-const NAME = 'chrome-webextension-test';
+import { BatchSpanProcessor, WebTracerProvider, StackContextManager } from '@opentelemetry/sdk-trace-web';
+import { ZoneContextManager } from '@opentelemetry/context-zone';
+import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import { Resource } from '@opentelemetry/resources';
+import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import { AsyncHooksContextManager } from '@opentelemetry/context-async-hooks';
+
+import {
+  type Context,
+  propagation,
+  trace,
+  Span,
+  context,
+} from '@opentelemetry/api';
+
+const NAME = 'Simple Extension Test';
 const VERSION = '1.0.0';
 const ENV = 'dev'
 
 const faro = initializeFaro({
   internalLoggerLevel: InternalLoggerLevel.VERBOSE,
-  url: `http://localhost:8027/collect`,
-  apiKey: 'api_key',
+  url: `redacted`,
+  apiKey: 'redacted',
   trackWebVitalsAttribution: true,
   instrumentations: [
     ...getWebInstrumentations({
@@ -42,6 +57,27 @@ const faro = initializeFaro({
     environment: ENV,
   },
 });
+
+const resource = Resource.default().merge(
+  new Resource({
+    [SEMRESATTRS_SERVICE_NAME]: NAME,
+    [SEMRESATTRS_SERVICE_VERSION]: VERSION,
+  })
+);
+
+const provider = new WebTracerProvider({ resource });
+
+provider.register({
+  propagator: new W3CTraceContextPropagator(),
+  contextManager: new ZoneContextManager(),
+});
+
+// register OTel with Faro
+faro.api.initOTEL(trace, context);
+
+const contextManager = new ZoneContextManager();
+contextManager.enable();
+faro.api.getOTEL()?.context.setGlobalContextManager(contextManager);
 
 faro.api.pushLog(['Faro was initialized']);
 
@@ -79,14 +115,37 @@ const Popup = () => {
   const sendMessageButton = () => {
     const otel = faro.api.getOTEL();
 
+    interface Carrier {
+      traceparent?: string;
+      tracestate?: string;
+    }
+
     if (otel) {
       const span = otel.trace.getTracer('popup').startSpan('user-interaction');
+      const output: Carrier = {};
+
+      // Serialize the traceparent and tracestate from context into
+      // an output object.
+      //
+      // This example uses the active trace context, but you can
+      // use whatever context is appropriate to your scenario.
 
       otel.context.with(otel.trace.setSpan(otel.context.active(), span), () => {
+        propagation.inject(otel.context.active(), output);
+
+        const { traceparent, tracestate } = output;
+
+        console.log('Pedro logs', traceparent);
+        console.log('Pedro logs', tracestate);
+
         faro.api.pushLog(['send button clicked']);
-        chrome.runtime.sendMessage({ message: "button_clicked" });
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
+        chrome.runtime.sendMessage({ message: "button_clicked", traceparent }, 
+          (response) => {
+            span.setStatus({ code: SpanStatusCode.OK });
+            span.end();
+            alert("Received")
+          }
+        );
       });
     }
 
