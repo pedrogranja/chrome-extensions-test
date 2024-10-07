@@ -3,56 +3,23 @@ livedebugging {
   enabled = true
 }
 
-faro.receiver "integrations_app_agent_receiver" {
+otelcol.receiver.otlp "default" {
+  http {}
+  grpc {}
 
-	server {
-		listen_address           = "0.0.0.0"
-		listen_port              = "8027"
-		cors_allowed_origins     = ["*"]
-		max_allowed_payload_size = "10MiB"
-
-		rate_limiting {
-			rate = 50
-		}
-	}
-
-	sourcemaps { }
-
-	output {
-		traces = [otelcol.connector.spanmetrics.default.input,
-              otelcol.processor.batch.default.input]
-	}
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.connector.spanmetrics.default.input,
+               otelcol.processor.batch.default.input]
+  }
 }
 
 otelcol.connector.spanmetrics "default" {
 
   // https://grafana.com/docs/alloy/latest/reference/components/otelcol.connector.spanmetrics/
 	dimension {
-		name = "service.namespace"
-	}
-
-	dimension {
 		name = "service.version"
-	}
-
-	dimension {
-		name = "deployment.environment"
-	}
-
-	dimension {
-		name = "k8s.cluster.name"
-	}
-
-	dimension {
-		name = "k8s.namespace.name"
-	}
-
-	dimension {
-		name = "cloud.region"
-	}
-
-	dimension {
-		name = "cloud.availability_zone"
 	}
 
 	histogram {
@@ -64,17 +31,31 @@ otelcol.connector.spanmetrics "default" {
 
   dimensions_cache_size = 333
 
-  aggregation_temporality = "DELTA"
-
   // The period on which all metrics (whose dimension keys remain in cache) will be emitted.
   metrics_flush_interval = "30s"
 
-  namespace = "test.namespace"
+  output {
+    metrics = [otelcol.processor.transform.default.input]
+  }
+}
+
+otelcol.processor.transform "default" {
+  error_mode = "ignore"
+
+  metric_statements {
+    context = "datapoint"
+    statements = [
+      // "insert" means that a metric datapoint attribute will be inserted
+      // only if an attribute with the same key does not already exist.
+      `merge_maps(attributes, resource.attributes, "insert")`,
+    ]
+  }
 
   output {
     metrics = [otelcol.processor.transform.test.input]
   }
 }
+
 
 otelcol.processor.transform "test" {
   output {
@@ -102,6 +83,6 @@ otelcol.exporter.otlphttp "grafana_cloud" {
 }
 
 otelcol.auth.basic "grafana_cloud" {
-	username = "redacted"
-	password = "redacted"
+	username = "(your grafana cloud OTEL endpoint)"
+	password = "(Grafana cloud auth with write permissions)"
 }

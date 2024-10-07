@@ -9,18 +9,15 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { TracingInstrumentation } from "@grafana/faro-web-tracing";
 import { createRoutesFromChildren, matchRoutes, Routes, useLocation, useNavigationType } from "react-router-dom";
 
-import { BatchSpanProcessor, WebTracerProvider, StackContextManager } from '@opentelemetry/sdk-trace-web';
+import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
 import { ZoneContextManager } from '@opentelemetry/context-zone';
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
 import { Resource } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import { AsyncHooksContextManager } from '@opentelemetry/context-async-hooks';
 
 import {
-  type Context,
   propagation,
   trace,
-  Span,
   context,
 } from '@opentelemetry/api';
 
@@ -30,8 +27,8 @@ const ENV = 'dev'
 
 const faro = initializeFaro({
   internalLoggerLevel: InternalLoggerLevel.VERBOSE,
-  url: `redacted`,
-  apiKey: 'redacted',
+  url: `(your grafana cloud url)`,
+  apiKey: '(your api key)',
   trackWebVitalsAttribution: true,
   instrumentations: [
     ...getWebInstrumentations({
@@ -124,19 +121,10 @@ const Popup = () => {
       const span = otel.trace.getTracer('popup').startSpan('user-interaction');
       const output: Carrier = {};
 
-      // Serialize the traceparent and tracestate from context into
-      // an output object.
-      //
-      // This example uses the active trace context, but you can
-      // use whatever context is appropriate to your scenario.
-
       otel.context.with(otel.trace.setSpan(otel.context.active(), span), () => {
         propagation.inject(otel.context.active(), output);
 
         const { traceparent, tracestate } = output;
-
-        console.log('Pedro logs', traceparent);
-        console.log('Pedro logs', tracestate);
 
         faro.api.pushLog(['send button clicked']);
         chrome.runtime.sendMessage({ message: "button_clicked", traceparent }, 
