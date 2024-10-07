@@ -3,12 +3,15 @@
 The objective of this repo, is to showcase a simple extension working with grafana cloud. Both the Popup and the 
 service worker (Extension background process) should be traced and correlated together, with the background process having manual instrumentation using OTEL. Furhthermore, it should also be possible to see in grafana, in the application overview page the service worker and the popup in the Frontend tab 
 
+![grafana_extension_integration_architecture](https://github.com/user-attachments/assets/4afd617c-112e-47e9-834b-40bbfbb58750)
+
 ## Prerequisites
 
 * [node + npm](https://nodejs.org/) (e.g node:20)
 * A Grafana cloud account
 
 ## Project Structure
+
 
 * src/typescript: TypeScript source files
 * src/assets: static files
