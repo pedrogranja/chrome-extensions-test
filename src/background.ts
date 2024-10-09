@@ -1,5 +1,5 @@
 // Background process in service worker
-import { trace, context, SpanStatusCode, SpanKind } from '@opentelemetry/api';
+import { trace, context, SpanStatusCode, SpanKind, Exception } from '@opentelemetry/api';
 import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
 import { ConsoleSpanExporter, SimpleSpanProcessor, AlwaysOnSampler } from '@opentelemetry/sdk-trace-base';
 import { Resource } from '@opentelemetry/resources';
@@ -9,8 +9,22 @@ import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
 import { CustomExporter } from './custom_exporter';
 import { type Context, propagation } from '@opentelemetry/api';
+import { SimpleLogRecordProcessor, ConsoleLogRecordExporter, LoggerProvider } from '@opentelemetry/sdk-logs';
+import { events } from '@opentelemetry/api-events';
+import { EventLoggerProvider } from '@opentelemetry/sdk-events';
+import { SeverityNumber } from '@opentelemetry/api-logs';
+import { CustomLogExporter } from './custom_logs_exporter';
 
 const NAME = 'chrome-webextension-test-background-new';
+
+function sleep(milliseconds : any) {
+  var start = new Date().getTime();
+  for (var i = 0; i < 1e7; i++) {
+    if ((new Date().getTime() - start) > milliseconds){
+      break;
+    }
+  }
+}
 
 const provider = new WebTracerProvider(
   {
@@ -41,6 +55,34 @@ registerInstrumentations({
 });
 
 
+// Events setup
+const loggerProvider = new LoggerProvider({
+  resource: new Resource({
+    [SEMRESATTRS_SERVICE_NAME]: NAME,
+    [SEMRESATTRS_SERVICE_NAMESPACE] : 'new_test'
+  }),
+});
+loggerProvider.addLogRecordProcessor(
+  new SimpleLogRecordProcessor(new CustomLogExporter({
+    // optional - default url is http://localhost:4318/v1/traces
+    url: 'http://localhost:4318/v1/logs',
+    // optional - collection of custom headers to be sent with each request, empty by default
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }))
+);
+
+// Register a global EventLoggerProvider.
+// This would be used by instrumentations, similar to how the global TracerProvider,
+// LoggerProvider and MeterProvider work.
+const eventLoggerProvider = new EventLoggerProvider(loggerProvider);
+events.setGlobalEventLoggerProvider(eventLoggerProvider);
+
+// Get an EventLogger from the global EventLoggerProvider
+const eventLogger = events.getEventLogger('default');
+
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.message === "button_clicked") {
 
@@ -65,16 +107,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }, activeContext);
     
     context.with(trace.setSpan(context.active(), span), () => {
+      try {
         // push log
-        span.setStatus({ code: SpanStatusCode.OK });
-        console.log("Finishing OTEL trace");
-        span.end();
+        throw new Error("I'm a very bad error too :(");
+      }
+      catch (e) {
+        // logging an event in an instrumentation library
+        span.recordException(<Error>e);
+        eventLogger.emit(
+          { name: (<Error>e).name,
+          attributes: { app_name: 
+                        'Simple Extension Test', 
+                        kind: 'exception'
+                      },
+          data: (<Error>e).message,
+          severityNumber: SeverityNumber.ERROR,
+          context: context.active()
+        });
+      }
+      // push log
+      span.setStatus({ code: SpanStatusCode.OK });
+      console.log("Finishing OTEL trace");
+      span.end();
     });
 
-    const span2 = trace.getTracer('background').startSpan('background process');
+    const span2 = trace.getTracer('background').startSpan('background process', {
+      kind: SpanKind.SERVER,
+    });
     context.with(trace.setSpan(context.active(), span2), () => {
-        // push log
-        span2.setStatus({ code: SpanStatusCode.OK });
+        try {
+          // push log
+          sleep(1000);
+          throw new Error("I'm a very bad error");
+        }
+        catch (e) {
+          console.log("Error");
+          span2.recordException(<Error>e);
+          span2.setStatus({ code: SpanStatusCode.ERROR });
+        }
         console.log("Finishing OTEL trace 2");
         span2.end();
     });

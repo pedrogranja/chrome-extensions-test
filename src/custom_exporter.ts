@@ -27,12 +27,6 @@ implements SpanExporter
     constructor(config: OTLPExporterConfigBase = {}) {
         super(config, JsonTraceSerializer, 'application/json');
         const env = getEnv();
-        this._headers = Object.assign(
-        this._headers,
-        baggageUtils.parseKeyPairsIntoRecord(
-            env.OTEL_EXPORTER_OTLP_TRACES_HEADERS
-        )
-        );
     }
 
     send(
