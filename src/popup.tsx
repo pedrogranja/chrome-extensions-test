@@ -1,84 +1,92 @@
 import React, { useEffect, useState } from "react";
 import { hydrateRoot } from 'react-dom/client';
-import { FaroErrorBoundary, ReactIntegration, ReactRouterVersion } from '@grafana/faro-react';
-import { getWebInstrumentations, initializeFaro, InternalLoggerLevel } from '@grafana/faro-web-sdk';
 
 import ButtonGroup from 'react-bootstrap/ButtonGroup';
 import Button from 'react-bootstrap/Button';
-import { SpanStatusCode } from '@opentelemetry/api';
-import { TracingInstrumentation } from "@grafana/faro-web-tracing";
-import { createRoutesFromChildren, matchRoutes, Routes, useLocation, useNavigationType } from "react-router-dom";
 
-import { BatchSpanProcessor, WebTracerProvider, StackContextManager } from '@opentelemetry/sdk-trace-web';
-import { ZoneContextManager } from '@opentelemetry/context-zone';
-import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import { trace, context, SpanStatusCode, SpanKind, Exception } from '@opentelemetry/api';
+import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
+import { ConsoleSpanExporter, SimpleSpanProcessor, AlwaysOnSampler } from '@opentelemetry/sdk-trace-base';
 import { Resource } from '@opentelemetry/resources';
-import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import { AsyncHooksContextManager } from '@opentelemetry/context-async-hooks';
+import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION, SEMRESATTRS_SERVICE_NAMESPACE } from '@opentelemetry/semantic-conventions';
+import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
+import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
+import { CustomExporter } from './custom_exporter';
+import { type Context, propagation } from '@opentelemetry/api';
+import { SimpleLogRecordProcessor, LoggerProvider } from '@opentelemetry/sdk-logs';
+import { events } from '@opentelemetry/api-events';
+import { EventLoggerProvider } from '@opentelemetry/sdk-events';
+import { SeverityNumber } from '@opentelemetry/api-logs';
+import { CustomLogExporter } from './custom_logs_exporter';
+import { DocumentLoadInstrumentation } from '@opentelemetry/instrumentation-document-load';
+import { UserInteractionInstrumentation } from '@opentelemetry/instrumentation-user-interaction';
 
-import {
-  propagation,
-  trace,
-  context,
-  SpanKind
-} from '@opentelemetry/api';
 
-const NAME = 'Simple Extension Test';
+const NAME = 'Simple Extension Test new';
 const VERSION = '1.0.0';
-const ENV = 'dev'
 
-const faro = initializeFaro({
-  internalLoggerLevel: InternalLoggerLevel.VERBOSE,
-  url: `http://localhost:12345/collect`,
-  apiKey: 'api_key',
-  trackWebVitalsAttribution: true,
-  instrumentations: [
-    ...getWebInstrumentations({
-      captureConsole: true,
+const provider = new WebTracerProvider(
+  {
+    resource: new Resource({
+      [SEMRESATTRS_SERVICE_NAME]: NAME,
+      [SEMRESATTRS_SERVICE_VERSION]: VERSION,
+      [SEMRESATTRS_SERVICE_NAMESPACE]: "FE", 
     }),
-    new TracingInstrumentation(),
-    new ReactIntegration({
-      router: {
-        version: ReactRouterVersion.V6,
-        dependencies: {
-          createRoutesFromChildren,
-          matchRoutes,
-          Routes,
-          useLocation,
-          useNavigationType,
-        },
-      },
-    }),
-  ],
-  app: {
-    name: NAME,
-    version: VERSION,
-    environment: ENV,
-  }
-});
+    sampler: new AlwaysOnSampler()
+ });
 
-const resource = Resource.default().merge(
-  new Resource({
-    [SEMRESATTRS_SERVICE_NAME]: NAME,
-    [SEMRESATTRS_SERVICE_VERSION]: VERSION
-  })
-);
+provider.addSpanProcessor(new SimpleSpanProcessor(new CustomExporter({
+  // optional - default url is http://localhost:4318/v1/traces
+  url: 'http://localhost:4318/v1/traces',
+  // optional - collection of custom headers to be sent with each request, empty by default
+  headers: {
+    "Content-Type": "application/json",
+  },
+})));
 
-const provider = new WebTracerProvider({ resource });
+provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
 
 provider.register({
-  propagator: new W3CTraceContextPropagator(),
-  contextManager: new ZoneContextManager(),
+  propagator: new W3CTraceContextPropagator()
 });
 
-// register OTel with Faro
-faro.api.initOTEL(trace, context);
+registerInstrumentations({
+  instrumentations: [
+    new FetchInstrumentation(), 
+    new DocumentLoadInstrumentation(),
+    new UserInteractionInstrumentation()
+  ]
+});
 
-const contextManager = new ZoneContextManager();
-contextManager.enable();
-faro.api.getOTEL()?.context.setGlobalContextManager(contextManager);
 
-faro.api.pushLog(['Faro was initialized']);
+// Events setup
+const loggerProvider = new LoggerProvider({
+  resource: new Resource({
+    [SEMRESATTRS_SERVICE_NAME]: NAME,
+    [SEMRESATTRS_SERVICE_NAMESPACE] : 'new_test'
+  }),
+});
+loggerProvider.addLogRecordProcessor(
+  new SimpleLogRecordProcessor(new CustomLogExporter({
+    // optional - default url is http://localhost:4318/v1/traces
+    url: 'http://localhost:4318/v1/logs',
+    // optional - collection of custom headers to be sent with each request, empty by default
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }))
+);
+
+// Register a global EventLoggerProvider.
+// This would be used by instrumentations, similar to how the global TracerProvider,
+// LoggerProvider and MeterProvider work.
+const eventLoggerProvider = new EventLoggerProvider(loggerProvider);
+events.setGlobalEventLoggerProvider(eventLoggerProvider);
+
+// Get an EventLogger from the global EventLoggerProvider
+const eventLogger = events.getEventLogger('default');
+
 
 const Popup = () => {
   const [count, setCount] = useState(0);
@@ -112,16 +120,17 @@ const Popup = () => {
   };
 
   const sendMessageButton = () => {
-    const otel = faro.api.getOTEL();
 
     interface Carrier {
       traceparent?: string;
       tracestate?: string;
     }
 
-    if (otel) {
-      const span = otel.trace.getTracer('popup').startSpan('user-interaction', {
-        kind: SpanKind.CLIENT,
+      const span = trace.getTracer('popup').startSpan('user-interaction', {
+        kind: SpanKind.SERVER,
+        attributes : {
+          'page-url' : 'this-is-a-test-page-url'
+        }
       },);
       const output: Carrier = {};
 
@@ -131,21 +140,19 @@ const Popup = () => {
       // This example uses the active trace context, but you can
       // use whatever context is appropriate to your scenario.
 
-      otel.context.with(otel.trace.setSpan(otel.context.active(), span), () => {
-        propagation.inject(otel.context.active(), output);
+      context.with(trace.setSpan(context.active(), span), () => {
+        propagation.inject(context.active(), output);
 
         const { traceparent, tracestate } = output;
 
         console.log('Pedro logs', traceparent);
         console.log('Pedro logs', tracestate);
 
-        faro.api.pushError(new Error('I\'m an error in the FE!'), 
-          { context : { 'traceID' : span.spanContext().traceId,
-                        'spanID' : span.spanContext().spanId
-                      } 
-          });
+        eventLogger.emit({
+          name: "FE error",
+          data: "test in the FE"
+        });
 
-        faro.api.pushLog(['send button clicked']);
         chrome.runtime.sendMessage({ message: "button_clicked", traceparent }, 
           (response) => {
             span.setStatus({ code: SpanStatusCode.OK });
@@ -154,7 +161,6 @@ const Popup = () => {
           }
         );
       });
-    }
 
   }
 
@@ -183,8 +189,6 @@ const Popup = () => {
 hydrateRoot(
   document.getElementById("root") as HTMLElement,
   <React.StrictMode>
-    <FaroErrorBoundary>
       <Popup />
-    </FaroErrorBoundary>
   </React.StrictMode>
 );

@@ -9,7 +9,7 @@ import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
 import { CustomExporter } from './custom_exporter';
 import { type Context, propagation } from '@opentelemetry/api';
-import { SimpleLogRecordProcessor, ConsoleLogRecordExporter, LoggerProvider } from '@opentelemetry/sdk-logs';
+import { SimpleLogRecordProcessor, LoggerProvider } from '@opentelemetry/sdk-logs';
 import { events } from '@opentelemetry/api-events';
 import { EventLoggerProvider } from '@opentelemetry/sdk-events';
 import { SeverityNumber } from '@opentelemetry/api-logs';
