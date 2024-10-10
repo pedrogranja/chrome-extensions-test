@@ -81,7 +81,7 @@ sendWithFetch(
     }, exporterTimeout);
 
     const defaultHeaders = {
-        'Content-Type': 'application/json',
+      'Content-Type': 'application/json',
     };
   
     const fetchWithRetry = (
@@ -179,6 +179,6 @@ sendWithFetch(
             DEFAULT_COLLECTOR_RESOURCE_PATH
         );
         }
-}
+      }
 
 }

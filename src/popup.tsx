@@ -10,7 +10,6 @@ import { ConsoleSpanExporter, SimpleSpanProcessor, AlwaysOnSampler } from '@open
 import { Resource } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION, SEMRESATTRS_SERVICE_NAMESPACE } from '@opentelemetry/semantic-conventions';
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
-import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
 import { CustomExporter } from './custom_exporter';
 import { type Context, propagation } from '@opentelemetry/api';
@@ -21,71 +20,35 @@ import { SeverityNumber } from '@opentelemetry/api-logs';
 import { CustomLogExporter } from './custom_logs_exporter';
 import { DocumentLoadInstrumentation } from '@opentelemetry/instrumentation-document-load';
 import { UserInteractionInstrumentation } from '@opentelemetry/instrumentation-user-interaction';
+import { HoneycombWebSDK } from '@honeycombio/opentelemetry-web';
+import { getWebAutoInstrumentations } from '@opentelemetry/auto-instrumentations-web';
 
 
 const NAME = 'Simple Extension Test new';
 const VERSION = '1.0.0';
 
-const provider = new WebTracerProvider(
-  {
-    resource: new Resource({
-      [SEMRESATTRS_SERVICE_NAME]: NAME,
-      [SEMRESATTRS_SERVICE_VERSION]: VERSION,
-      [SEMRESATTRS_SERVICE_NAMESPACE]: "FE", 
-    }),
-    sampler: new AlwaysOnSampler()
- });
 
-provider.addSpanProcessor(new SimpleSpanProcessor(new CustomExporter({
-  // optional - default url is http://localhost:4318/v1/traces
-  url: 'http://localhost:4318/v1/traces',
-  // optional - collection of custom headers to be sent with each request, empty by default
-  headers: {
-    "Content-Type": "application/json",
-  },
-})));
+const configDefaults = {
+  ignoreNetworkEvents: true,
+  // propagateTraceHeaderCorsUrls: [
+  // /.+/g, // Regex to match your backend URLs. Update to the domains you wish to include.
+  // ]
+}
 
-provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
-
-provider.register({
-  propagator: new W3CTraceContextPropagator()
+const sdk = new HoneycombWebSDK({
+  // endpoint: "https://api.eu1.honeycomb.io/v1/traces", // Send to EU instance of Honeycomb. Defaults to sending to US instance.
+  debug: true, // Set to false for production environment.
+  apiKey: 'api_key', // Replace with your Honeycomb Ingest API Key.
+  serviceName: NAME, // Replace with your application name. Honeycomb uses this string to find your dataset when we receive your data. When no matching dataset exists, we create a new one with this name if your API Key has the appropriate permissions.
+  tracesEndpoint: 'http://localhost:4318/v1/traces',
+  instrumentations: [getWebAutoInstrumentations({
+    // Loads custom configuration for xml-http-request instrumentation.
+    '@opentelemetry/instrumentation-xml-http-request': configDefaults,
+    '@opentelemetry/instrumentation-fetch': configDefaults,
+    '@opentelemetry/instrumentation-document-load': configDefaults,
+  })],
 });
-
-registerInstrumentations({
-  instrumentations: [
-    new FetchInstrumentation(), 
-    new DocumentLoadInstrumentation(),
-    new UserInteractionInstrumentation()
-  ]
-});
-
-
-// Events setup
-const loggerProvider = new LoggerProvider({
-  resource: new Resource({
-    [SEMRESATTRS_SERVICE_NAME]: NAME,
-    [SEMRESATTRS_SERVICE_NAMESPACE] : 'new_test'
-  }),
-});
-loggerProvider.addLogRecordProcessor(
-  new SimpleLogRecordProcessor(new CustomLogExporter({
-    // optional - default url is http://localhost:4318/v1/traces
-    url: 'http://localhost:4318/v1/logs',
-    // optional - collection of custom headers to be sent with each request, empty by default
-    headers: {
-      "Content-Type": "application/json",
-    },
-  }))
-);
-
-// Register a global EventLoggerProvider.
-// This would be used by instrumentations, similar to how the global TracerProvider,
-// LoggerProvider and MeterProvider work.
-const eventLoggerProvider = new EventLoggerProvider(loggerProvider);
-events.setGlobalEventLoggerProvider(eventLoggerProvider);
-
-// Get an EventLogger from the global EventLoggerProvider
-const eventLogger = events.getEventLogger('default');
+sdk.start();
 
 
 const Popup = () => {
@@ -147,11 +110,6 @@ const Popup = () => {
 
         console.log('Pedro logs', traceparent);
         console.log('Pedro logs', tracestate);
-
-        eventLogger.emit({
-          name: "FE error",
-          data: "test in the FE"
-        });
 
         chrome.runtime.sendMessage({ message: "button_clicked", traceparent }, 
           (response) => {

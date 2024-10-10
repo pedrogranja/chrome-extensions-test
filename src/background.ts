@@ -39,9 +39,6 @@ provider.addSpanProcessor(new SimpleSpanProcessor(new CustomExporter({
   // optional - default url is http://localhost:4318/v1/traces
   url: 'http://localhost:4318/v1/traces',
   // optional - collection of custom headers to be sent with each request, empty by default
-  headers: {
-    "Content-Type": "application/json",
-  },
 })));
 
 provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
@@ -113,7 +110,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
       catch (e) {
         // logging an event in an instrumentation library
-        span.recordException(<Error>e);
         eventLogger.emit(
           { name: (<Error>e).name,
           attributes: { app_name: 
